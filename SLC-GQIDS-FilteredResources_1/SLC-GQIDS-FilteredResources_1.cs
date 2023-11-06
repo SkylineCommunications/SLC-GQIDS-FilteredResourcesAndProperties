@@ -55,7 +55,6 @@ namespace SLC_GQIDS_FilteredResources_1
 	using System.Collections.Generic;
 	using System.Linq;
 	using Skyline.DataMiner.Analytics.GenericInterface;
-	using Skyline.DataMiner.Analytics.Util;
 	using Skyline.DataMiner.Net.Helper;
 	using Skyline.DataMiner.Net.Messages;
 	using Skyline.DataMiner.Net.Messages.SLDataGateway;
@@ -104,8 +103,6 @@ namespace SLC_GQIDS_FilteredResources_1
          new GQIStringColumn("Name"),
          new GQIStringColumn("Status"),
          new GQIIntColumn("Concurrency"),
-         new GQIIntColumn("Max Quantity"),
-         new GQIDoubleColumn("Bandwidth"),
          new GQIStringColumn("Type"),
         };
 
@@ -119,20 +116,25 @@ namespace SLC_GQIDS_FilteredResources_1
             return new OnInitOutputArgs();
         }
 
-        private static double SetCapacityValue(string v, Resource resource)
+        private string SetCapabilityValue(string v, Resource resource)
         {
-            var guid = GuidMapping.Mapping[v];
-            var value = resource.Capacities.FirstOrDefault(obj => obj.CapacityProfileID.Equals(guid))?.Value.MaxDecimalQuantity;
+            // Obtaining all Capabilities GUIDs for this resource:
+            var guids = resource.Capabilities.Select(obj => obj.CapabilityProfileID);
 
-            return value.HasValue ? Convert.ToDouble(value.Value) : -1;
-        }
+            // Requesting Profile Parameters for this GUIDs:
+            var profileParameterResponse = _dms.SendMessage(new GetProfileManagerParameterMessage(guids)) as ProfileManagerResponseMessage;
 
-        private static string SetCapabilityValue(string v, Resource resource)
-        {
-            var guid = GuidMapping.Mapping[v];
-            var stringList = resource.Capabilities.FirstOrDefault(obj => obj.CapabilityProfileID.Equals(guid))?.Value.Discreets;
+            // Finding Profile Parameter with Name field set to value of argument 'v':
+            foreach (var tuple in profileParameterResponse.ManagerObjects)
+            {
+                if (tuple.Item2 is Skyline.DataMiner.Net.Profiles.Parameter parameter && parameter.Name.Equals(v))
+                {
+                    var stringList = resource.Capabilities.FirstOrDefault(obj => obj.CapabilityProfileID.Equals(parameter.ID))?.Value.Discreets;
+                    return stringList.IsNotNullOrEmpty() ? String.Join(";", stringList) : $"N/A";
+                }
+            }
 
-            return stringList.IsNullOrEmpty() ? $"N/A" : String.Join(";", stringList);
+            return $"N/A";
         }
 
         private List<GQIRow> GenerateRows(ResourceResponseMessage resources)
@@ -167,22 +169,6 @@ namespace SLC_GQIDS_FilteredResources_1
                         case "Concurrency":
                             {
                                 cells.Add(new GQICell { Value = resource.MaxConcurrency });
-                                break;
-                            }
-
-                        case "Max Quantity":
-                            {
-                                int maxQuantity = Convert.ToInt32(SetCapacityValue("Max Quantity", resource));
-
-                                cells.Add(new GQICell { Value = maxQuantity, DisplayValue = maxQuantity != -1 ? maxQuantity.ToString() : $"N/A" });
-                                break;
-                            }
-
-                        case "Bandwidth":
-                            {
-                                var bandwidthValue = SetCapacityValue("Bandwidth", resource);
-
-                                cells.Add(new GQICell { Value = bandwidthValue, DisplayValue = bandwidthValue.NearEquals(-1) ? $"N/A" : $"{bandwidthValue:0.00} Mbps" });
                                 break;
                             }
 
