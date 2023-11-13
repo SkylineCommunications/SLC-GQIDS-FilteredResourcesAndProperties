@@ -51,22 +51,34 @@ DATE		VERSION		AUTHOR			COMMENTS
 
 namespace SLC_GQIDS_FilteredResources_1
 {
-	using System;
-	using System.Collections.Generic;
-	using System.Linq;
-	using Skyline.DataMiner.Analytics.GenericInterface;
-	using Skyline.DataMiner.Net.Helper;
-	using Skyline.DataMiner.Net.Messages;
-	using Skyline.DataMiner.Net.Messages.SLDataGateway;
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
 
-	[GQIMetaData(Name = "Filtered Resources")]
-	public class MyDataSource : IGQIDataSource, IGQIInputArguments, IGQIOnInit
+    using Skyline.DataMiner.Analytics.GenericInterface;
+    using Skyline.DataMiner.Net.Helper;
+    using Skyline.DataMiner.Net.Messages;
+    using Skyline.DataMiner.Net.Messages.SLDataGateway;
+
+    [GQIMetaData(Name = "Filtered Resources")]
+    public class MyDataSource : IGQIDataSource, IGQIInputArguments, IGQIOnInit
     {
-        private readonly GQIStringArgument _resourcePoolArg = new GQIStringArgument("Resource Pool") { IsRequired = true, DefaultValue = String.Empty };
+        private readonly GetProfileManagerParameterMessage _profileParameterMessage = new GetProfileManagerParameterMessage
+        {
+            ManagerObjects = new List<Skyline.DataMiner.Net.Profiles.Parameter>
+                {
+                    new Skyline.DataMiner.Net.Profiles.Parameter
+                    {
+                        Name = "Type", // Get the Profile Parameter with name 'Type';
+                    },
+                },
+        };
 
-        private GQIDMS _dms;
-        private string _resourcePool;
+        private readonly GQIStringArgument _resourcePoolArg = new GQIStringArgument("Resource Pool") { IsRequired = true, DefaultValue = String.Empty };
         private List<GQIColumn> _columns;
+        private GQIDMS _dms;
+        private ProfileManagerResponseMessage _profileParameterResponse;
+        private string _resourcePool;
 
         public GQIColumn[] GetColumns()
         {
@@ -80,6 +92,9 @@ namespace SLC_GQIDS_FilteredResources_1
 
         public GQIPage GetNextPage(GetNextPageInputArgs args)
         {
+            // Get the profile parameter 'Type' (if there is any);
+            _profileParameterResponse = _dms.SendMessage(_profileParameterMessage) as ProfileManagerResponseMessage;
+
             FilterElement<Resource> filter;
             var resourcePoolFilter = ResourceExposers.PoolGUIDs.Contains(new Guid(_resourcePool));
             filter = new ANDFilterElement<Resource>(resourcePoolFilter);
@@ -114,27 +129,6 @@ namespace SLC_GQIDS_FilteredResources_1
         {
             _dms = args.DMS;
             return new OnInitOutputArgs();
-        }
-
-        private string SetCapabilityValue(string v, Resource resource)
-        {
-            // Obtaining all Capabilities GUIDs for this resource:
-            var guids = resource.Capabilities.Select(obj => obj.CapabilityProfileID);
-
-            // Requesting Profile Parameters for this GUIDs:
-            var profileParameterResponse = _dms.SendMessage(new GetProfileManagerParameterMessage(guids)) as ProfileManagerResponseMessage;
-
-            // Finding Profile Parameter with Name field set to value of argument 'v':
-            foreach (var tuple in profileParameterResponse.ManagerObjects)
-            {
-                if (tuple.Item2 is Skyline.DataMiner.Net.Profiles.Parameter parameter && parameter.Name.Equals(v))
-                {
-                    var stringList = resource.Capabilities.FirstOrDefault(obj => obj.CapabilityProfileID.Equals(parameter.ID))?.Value.Discreets;
-                    return stringList.IsNotNullOrEmpty() ? String.Join(";", stringList) : $"N/A";
-                }
-            }
-
-            return $"N/A";
         }
 
         private List<GQIRow> GenerateRows(ResourceResponseMessage resources)
@@ -174,7 +168,7 @@ namespace SLC_GQIDS_FilteredResources_1
 
                         case "Type":
                             {
-                                cells.Add(new GQICell { Value = SetCapabilityValue("Type", resource) });
+                                cells.Add(new GQICell { Value = SetCapabilityValue(resource) });
                                 break;
                             }
 
@@ -196,6 +190,17 @@ namespace SLC_GQIDS_FilteredResources_1
             ResourceResponseMessage resourceResponse;
             resourceResponse = (ResourceResponseMessage)_dms.SendMessage(new GetResourceMessage(filter));
             return resourceResponse;
+        }
+
+        private string SetCapabilityValue(Resource resource)
+        {
+            if (_profileParameterResponse.ManagerObjects.FirstOrDefault()?.Item2 is Skyline.DataMiner.Net.Profiles.Parameter typeProfileParameter)
+            {
+                var stringList = resource.Capabilities.Find(obj => obj.CapabilityProfileID.Equals(typeProfileParameter.ID))?.Value.Discreets;
+                return stringList.IsNotNullOrEmpty() ? String.Join(";", stringList) : $"N/A";
+            }
+
+            return $"N/A";
         }
     }
 }
